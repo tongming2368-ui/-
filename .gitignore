@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+uploads/
+.env
+server/.env
+nohup.out
+*.log
+.DS_Store

@@ -1,0 +1,4 @@
+node_modules/
+phototool.db
+uploads/
+.env

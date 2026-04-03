@@ -1,0 +1,176 @@
+import crypto from 'crypto'
+import { Router } from 'express'
+import jwt from 'jsonwebtoken'
+import db from '../db.js'
+import bcrypt from 'bcryptjs'
+import { generateToken, JWT_SECRET } from '../middleware/auth.js'
+import nodemailer from 'nodemailer'
+
+const transporter = nodemailer.createTransport({
+  host: 'smtp.qq.com',
+  port: 465,
+  secure: true,
+  auth: { user: 'hxmpost@qq.com', pass: 'vhjnbnzmgowmbjce' }
+})
+
+const router = Router()
+
+// 生成随机UID（6位数字）
+const genUID = () => String(Math.floor(100000 + Math.random() * 900000))
+
+// 生成6位验证码
+const genCode = () => String(Math.floor(100000 + Math.random() * 900000))
+
+// POST /api/auth/register
+router.post('/register', (req, res) => {
+  const { username, email, password, verifyCode } = req.body
+  if (!username || !email || !password || !verifyCode) {
+    return res.status(400).json({ error: '请填写完整信息' })
+  }
+
+  // 验证验证码
+  const record = db.prepare(
+    'SELECT * FROM verify_codes WHERE email = ? AND code = ? AND type = ? AND used = 0 AND expires_at > ?'
+  ).get(email, verifyCode, 'register', Date.now())
+  if (!record) return res.status(400).json({ error: '验证码错误或已过期' })
+
+  // 标记验证码已使用
+  db.prepare('UPDATE verify_codes SET used = 1 WHERE id = ?').run(record.id)
+
+  // 检查用户名/邮箱（username允许中文）
+  const existUser = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email)
+  if (existUser) return res.status(400).json({ error: '用户名或邮箱已被注册' })
+
+  const hash = bcrypt.hashSync(password, 10)
+  const uid = genUID()
+  const today = new Date().toISOString().slice(0, 10)
+
+  const result = db.prepare(`
+    INSERT INTO users (uid, username, nickname, email, password, join_date, is_registered, email_verified, points)
+    VALUES (?, ?, ?, ?, ?, ?, 1, 1, 100)
+  `).run(uid, username, username, email, hash, today)
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid)
+  const token = generateToken(user)
+
+  res.json({
+    token,
+    user: formatUser(user),
+    uid: uid  // 返回用户ID，方便用户记住
+  })
+})
+
+// POST /api/auth/login - 支持 uid+密码 或 邮箱+密码
+router.post('/login', (req, res) => {
+  const { username, password } = req.body
+  if (!username || !password) {
+    return res.status(400).json({ error: '请输入用户名和密码' })
+  }
+
+  // 支持三种登录方式：uid / email / username
+  const user = db.prepare(
+    'SELECT * FROM users WHERE uid = ? OR email = ? OR username = ?'
+  ).get(username, username, username)
+
+  if (!user) return res.status(400).json({ error: '用户不存在' })
+  if (!bcrypt.compareSync(password, user.password)) {
+    return res.status(400).json({ error: '密码错误' })
+  }
+
+  const token = generateToken(user)
+  res.json({
+    token,
+    user: formatUser(user)
+  })
+})
+
+// POST /api/auth/send-code
+router.post('/send-code', async (req, res) => {
+  const { email, type = 'register' } = req.body
+  if (!email) return res.status(400).json({ error: '请输入邮箱' })
+
+  const recent = db.prepare(
+    'SELECT * FROM verify_codes WHERE email = ? AND type = ? AND created_at > datetime("now", "-60 seconds")'
+  ).get(email, type)
+  if (recent) return res.status(429).json({ error: '请60秒后再试' })
+
+  const code = genCode()
+  const expires = Date.now() + 5 * 60 * 1000
+
+  db.prepare(
+    'INSERT INTO verify_codes (email, code, type, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(email, code, type, expires)
+
+  console.log("[验证码] 邮箱:", email, "验证码:", code)
+
+  try {
+    await transporter.sendMail({
+      from: '"一体两面" <hxmpost@qq.com>',
+      to: email,
+      subject: '验证码',
+      html: '<div style="padding:20px;font-family:sans-serif"><h2>验证码：' + code + '</h2><p>有效期5分钟，请勿泄露。</p></div>'
+    })
+    console.log("[邮件] 发送成功:", email)
+  } catch (e) {
+    console.error("[邮件] 发送失败:", e.message)
+  }
+
+  res.json({ message: '验证码已发送' })
+})
+router.get('/me', (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '')
+  if (!token) return res.status(401).json({ error: '未登录' })
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET)
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(decoded.id)
+    if (!user) return res.status(404).json({ error: '用户不存在' })
+    res.json({ user: formatUser(user) })
+  } catch {
+    res.status(401).json({ error: '登录已过期' })
+  }
+})
+
+
+// POST /api/auth/reset-password
+router.post("/reset-password", (req, res) => {
+  const { email, verifyCode, newPassword } = req.body
+  if (!email || !verifyCode || !newPassword) return res.status(400).json({ ok: false, msg: "请填写所有字段" })
+  if (newPassword.length < 6) return res.status(400).json({ ok: false, msg: "密码至少6位" })
+  
+  const codeRecord = db.prepare(
+    "SELECT * FROM verify_codes WHERE email = ? AND code = ? AND type = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
+  ).get(email, verifyCode, "reset", Date.now())
+  
+  if (!codeRecord) return res.status(400).json({ ok: false, msg: "验证码错误或已过期" })
+  
+  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email)
+  if (!user) return res.status(400).json({ ok: false, msg: "该邮箱未注册" })
+  
+  const hashedPassword = bcrypt.hashSync(newPassword, 10)
+  db.prepare("UPDATE users SET password = ? WHERE email = ?").run(hashedPassword, email)
+  db.prepare("DELETE FROM verify_codes WHERE email = ? AND type = ?").run(email, "reset")
+  
+  res.json({ ok: true, msg: "密码重置成功" })
+})
+
+function formatUser(user) {
+  if (!user) return null
+  const { password, ...rest } = user
+  return {
+    ...rest,
+    medals: safeJSON(rest.medals, []),
+    avatar: rest.avatar || '',
+    bio: rest.bio || '',
+    gender: rest.gender || '',
+    location: rest.location || '',
+    website: rest.website || '',
+    phone: rest.phone || '',
+  }
+}
+
+function safeJSON(str, fallback) {
+  try { return JSON.parse(str) } catch { return fallback }
+}
+
+export default router
