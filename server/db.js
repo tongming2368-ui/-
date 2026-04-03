@@ -196,6 +196,16 @@ export async function initDB() {
   
   // 积分记录表
   db.run(`CREATE TABLE IF NOT EXISTS points_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, points INTEGER NOT NULL, description TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`)
+
+  // 攻略表
+  db.run("CREATE TABLE IF NOT EXISTS guides (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT DEFAULT '', content TEXT DEFAULT '', cover_gradient TEXT DEFAULT '', cover_image TEXT DEFAULT '', tag TEXT DEFAULT '', author_id INTEGER, author_name TEXT DEFAULT '', view_count INTEGER DEFAULT 0, like_count INTEGER DEFAULT 0, comment_count INTEGER DEFAULT 0, is_sticky INTEGER DEFAULT 0, status TEXT DEFAULT 'published', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))")
+
+  // 厂商活动表
+  db.run("CREATE TABLE IF NOT EXISTS brand_activities (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT DEFAULT '', content TEXT DEFAULT '', brand TEXT DEFAULT '', brand_icon TEXT DEFAULT '📸', category TEXT DEFAULT '品牌活动', event_date TEXT DEFAULT '', location TEXT DEFAULT '', link TEXT DEFAULT '', cover_gradient TEXT DEFAULT '', is_highlight INTEGER DEFAULT 0, status TEXT DEFAULT 'active', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))")
+
+  // VIP字段
+  try { db.run("ALTER TABLE users ADD COLUMN vip_level INTEGER DEFAULT 0") } catch (e) {}
+  try { db.run("ALTER TABLE users ADD COLUMN vip_expire TEXT DEFAULT NULL") } catch (e) {}
   
   // 举报表
   db.run(`CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter_id INTEGER NOT NULL, target_type TEXT NOT NULL, target_id INTEGER NOT NULL, reason TEXT DEFAULT '', status TEXT DEFAULT 'pending', created_at TEXT DEFAULT (datetime('now')))`)

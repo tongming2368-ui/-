@@ -14,6 +14,8 @@ import tutorialRoutes from './routes/tutorials.js'
 import equipmentRoutes from './routes/equipment.js'
 import chatRoutes from './routes/chat.js'
 import adminRoutes from './routes/admin.js'
+import guidesRoutes from './routes/guides.js'
+import brandActivitiesRoutes from './routes/brand-activities.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -37,6 +39,8 @@ app.use('/api/tutorials', tutorialRoutes)
 app.use('/api/equipment', equipmentRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/guides', guidesRoutes)
+app.use('/api/brand-activities', brandActivitiesRoutes)
 
 // 健康检查
 app.get('/api/health', (req, res) => {

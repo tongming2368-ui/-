@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://mzpost.cn/</loc><priority>1.0</priority></url>
+  <url><loc>https://mzpost.cn/posts</loc><priority>0.8</priority></url>
+  <url><loc>https://mzpost.cn/equipment/camera</loc><priority>0.8</priority></url>
+  <url><loc>https://mzpost.cn/equipment/lens</loc><priority>0.8</priority></url>
+  <url><loc>https://mzpost.cn/showcase</loc><priority>0.8</priority></url>
+  <url><loc>https://mzpost.cn/tutorials</loc><priority>0.8</priority></url>
+  <url><loc>https://mzpost.cn/guides</loc><priority>0.7</priority></url>
+  <url><loc>https://mzpost.cn/tools</loc><priority>0.7</priority></url>
+  <url><loc>https://mzpost.cn/presets</loc><priority>0.7</priority></url>
+  <url><loc>https://mzpost.cn/activities</loc><priority>0.7</priority></url>
+  <url><loc>https://mzpost.cn/brand-activities</loc><priority>0.6</priority></url>
+  <url><loc>https://mzpost.cn/deals</loc><priority>0.6</priority></url>
+  <url><loc>https://mzpost.cn/links</loc><priority>0.5</priority></url>
+</urlset>

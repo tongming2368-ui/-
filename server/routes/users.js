@@ -150,6 +150,109 @@ router.get('/leaderboard', (req, res) => {
   res.json({ users })
 })
 
+
+// ========== 收藏功能 ==========
+// POST /api/users/collect - 收藏/取消收藏
+router.post('/collect', authRequired, (req, res) => {
+  const { target_type, target_id } = req.body
+  if (!target_type || !target_id) return res.status(400).json({ error: '参数不完整' })
+
+  const existing = db.prepare('SELECT * FROM user_actions WHERE user_id = ? AND target_type = ? AND target_id = ? AND action_type = ?').get(req.user.id, target_type, target_id, 'collect')
+
+  if (existing) {
+    // 取消收藏
+    db.prepare('DELETE FROM user_actions WHERE id = ?').run(existing.id)
+    db.prepare(`UPDATE ${target_type} SET collect_count = MAX(collect_count - 1, 0) WHERE id = ?`).run(target_id)
+    res.json({ collected: false })
+  } else {
+    // 收藏
+    db.prepare('INSERT INTO user_actions (user_id, target_type, target_id, action_type) VALUES (?, ?, ?, ?)').run(req.user.id, target_type, target_id, 'collect')
+    try { db.prepare(`UPDATE ${target_type} SET collect_count = collect_count + 1 WHERE id = ?`).run(target_id) } catch (e) {}
+    res.json({ collected: true })
+  }
+})
+
+// GET /api/users/collections - 我的收藏列表
+router.get('/collections', authRequired, (req, res) => {
+  const { target_type = 'posts', page = 1, limit = 20 } = req.query
+  const offset = (page - 1) * limit
+  const actions = db.prepare('SELECT target_id FROM user_actions WHERE user_id = ? AND target_type = ? AND action_type = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(req.user.id, target_type, 'collect', parseInt(limit), parseInt(offset))
+
+  const items = actions.map(a => {
+    try { return db.prepare(`SELECT * FROM ${target_type} WHERE id = ?`).get(a.target_id) } catch { return null }
+  }).filter(Boolean)
+
+  res.json({ items })
+})
+
+// ========== 关注功能 ==========
+// POST /api/users/follow - 关注/取消关注用户
+router.post('/follow', authRequired, (req, res) => {
+  const { target_id } = req.body
+  if (!target_id || target_id === req.user.id) return res.status(400).json({ error: '参数无效' })
+
+  const existing = db.prepare('SELECT * FROM user_actions WHERE user_id = ? AND target_type = ? AND target_id = ? AND action_type = ?').get(req.user.id, 'user', target_id, 'follow')
+
+  if (existing) {
+    db.prepare('DELETE FROM user_actions WHERE id = ?').run(existing.id)
+    db.prepare('UPDATE users SET following_count = MAX(following_count - 1, 0) WHERE id = ?').run(req.user.id)
+    db.prepare('UPDATE users SET followers_count = MAX(followers_count - 1, 0) WHERE id = ?').run(target_id)
+    res.json({ followed: false })
+  } else {
+    db.prepare('INSERT INTO user_actions (user_id, target_type, target_id, action_type) VALUES (?, ?, ?, ?)').run(req.user.id, 'user', target_id, 'follow')
+    db.prepare('UPDATE users SET following_count = following_count + 1 WHERE id = ?').run(req.user.id)
+    db.prepare('UPDATE users SET followers_count = followers_count + 1 WHERE id = ?').run(target_id)
+    res.json({ followed: true })
+  }
+})
+
+// GET /api/users/followers - 粉丝列表
+router.get('/followers', authRequired, (req, res) => {
+  const actions = db.prepare('SELECT user_id FROM user_actions WHERE target_type = ? AND target_id = ? AND action_type = ? ORDER BY created_at DESC LIMIT 50').all('user', req.user.id, 'follow')
+  const items = actions.map(a => db.prepare('SELECT id, uid, nickname, avatar, bio FROM users WHERE id = ?').get(a.user_id)).filter(Boolean)
+  res.json({ items })
+})
+
+// GET /api/users/following - 关注列表
+router.get('/following', authRequired, (req, res) => {
+  const actions = db.prepare('SELECT target_id FROM user_actions WHERE user_id = ? AND target_type = ? AND action_type = ? ORDER BY created_at DESC LIMIT 50').all(req.user.id, 'user', 'follow')
+  const items = actions.map(a => db.prepare('SELECT id, uid, nickname, avatar, bio FROM users WHERE id = ?').get(a.target_id)).filter(Boolean)
+  res.json({ items })
+})
+
+// ========== VIP 功能 ==========
+// POST /api/users/vip/open - 开通VIP
+router.post('/vip/open', authRequired, (req, res) => {
+  const { months = 1 } = req.body
+  const cost = 500 * months // 500积分/月
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)
+
+  if (user.points < cost) {
+    return res.status(400).json({ error: '积分不足', needed: cost, current: user.points })
+  }
+
+  const now = new Date()
+  let expireDate
+  if (user.vip_expire && new Date(user.vip_expire) > now) {
+    expireDate = new Date(new Date(user.vip_expire).getTime() + months * 30 * 24 * 60 * 60 * 1000)
+  } else {
+    expireDate = new Date(now.getTime() + months * 30 * 24 * 60 * 60 * 1000)
+  }
+
+  db.prepare('UPDATE users SET points = points - ?, vip_level = 1, vip_expire = ? WHERE id = ?').run(cost, expireDate.toISOString().split('T')[0], req.user.id)
+  db.prepare('INSERT INTO points_history (user_id, points, description) VALUES (?, ?, ?)').run(req.user.id, -cost, `开通VIP ${months}个月`)
+
+  res.json({ ok: true, vip_level: 1, vip_expire: expireDate.toISOString().split('T')[0], points: user.points - cost })
+})
+
+// GET /api/users/vip/status - VIP状态
+router.get('/vip/status', authRequired, (req, res) => {
+  const user = db.prepare('SELECT vip_level, vip_expire FROM users WHERE id = ?').get(req.user.id)
+  const isVip = user.vip_level > 0 && user.vip_expire && new Date(user.vip_expire) > new Date()
+  res.json({ vip_level: isVip ? user.vip_level : 0, vip_expire: user.vip_expire, is_vip: isVip })
+})
+
+
 export default router
 
 // ========== 收藏相关 ==========
