@@ -78,7 +78,31 @@ const toolMeta = {
   '焦点堆叠工具': { id: 'focusstack', desc: '多焦点合成深度清晰照片' },
 }
 
-const loadTools = () => {
+const loadTools = async () => {
+  try {
+    // 优先从 API 加载
+    const res = await fetch('/api/tools')
+    const data = await res.json()
+    if (data.items && data.items.length > 0) {
+      const apiTools = data.items.map(t => {
+        const meta = toolMeta[t.title]
+        return {
+          id: meta?.id || `api_${t.id}`,
+          icon: t.icon || '🔧',
+          name: t.title,
+          desc: meta?.desc || t.description || '摄影工具',
+          level: 1,
+          pointsCost: 0,
+          enabled: true,
+        }
+      })
+      const frontendOnly = defaultTools.filter(dt => !apiTools.find(at => at.id === dt.id))
+      allTools.value = [...apiTools, ...frontendOnly]
+      return
+    }
+  } catch (e) { /* fallback */ }
+
+  // 降级到 localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -96,15 +120,13 @@ const loadTools = () => {
           toolType: t.toolType,
         }
       })
-      // 合并后台工具和前端特有的工具（图库、AI等），后台优先
       const frontendOnly = defaultTools.filter(dt => !enabledBackend.find(bt => bt.id === dt.id))
       allTools.value = [...enabledBackend, ...frontendOnly]
-    } else {
-      allTools.value = defaultTools
+      return
     }
-  } catch {
-    allTools.value = defaultTools
-  }
+  } catch {}
+
+  allTools.value = defaultTools
 }
 
 onMounted(() => {
