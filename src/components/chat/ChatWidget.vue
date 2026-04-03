@@ -2,7 +2,7 @@
   <Teleport to="body">
   <div class="chat-widget-container">
     <!-- Floating toggle button -->
-    <div v-if="!isOpen" class="chat-float-btn" @click="isOpen = true" title="打开聊天室">
+    <div v-if="!isOpen" class="chat-float-btn" @click="openChat" title="打开聊天室">
       <span class="float-icon">💬</span>
     </div>
 
@@ -14,17 +14,19 @@
           <button @click="isOpen = false" class="close-btn">×</button>
         </div>
         <div class="chat-messages" ref="msgList">
+          <div v-if="loading" class="chat-loading">加载中...</div>
+          <div v-else-if="messages.length === 0" class="chat-empty">暂无消息，来聊两句吧 💬</div>
           <div
             v-for="msg in messages"
             :key="msg.id"
             class="message"
-            :class="{ self: msg.userId === currentUser.value?.id || msg.userId === 0 }"
+            :class="{ self: msg.user_id === currentUser?.id }"
           >
-            <div class="msg-avatar">{{ msg.avatar || '👤' }}</div>
+            <div class="msg-avatar">{{ msg.author_avatar || '👤' }}</div>
             <div class="msg-content">
               <div class="msg-header">
-                <span class="msg-author">{{ msg.authorName }}</span>
-                <span class="msg-time">{{ formatTime(msg.createdAt) }}</span>
+                <span class="msg-author">{{ msg.author_name || '匿名' }}</span>
+                <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
               </div>
               <div class="msg-text">{{ msg.content }}</div>
             </div>
@@ -34,10 +36,10 @@
           <input
             v-model="newMessage"
             :placeholder="canSend ? '发送消息...' : `${countdown}秒后可发送`"
-            :disabled="!canSend"
+            :disabled="!canSend || !currentUser"
             @keyup.enter="handleSend"
           />
-          <button @click="handleSend" :disabled="!canSend">
+          <button @click="handleSend" :disabled="!canSend || !currentUser">
             {{ canSend ? '发送' : countdown }}
           </button>
         </div>
@@ -61,8 +63,24 @@ const isOpen = computed({
   set: (val) => emit('update:isOpen', val)
 })
 
-const openChat = () => {
-  isOpen.value = true
+const messages = ref([])
+const newMessage = ref('')
+const canSend = ref(true)
+const countdown = ref(0)
+const msgList = ref(null)
+const loading = ref(false)
+let timer = null
+let pollTimer = null
+
+const API_BASE = '/api/chat'
+
+const formatTime = (time) => {
+  if (!time) return ''
+  const d = new Date(time)
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+}
+
+const scrollToBottom = () => {
   nextTick(() => {
     if (msgList.value) {
       msgList.value.scrollTop = msgList.value.scrollHeight
@@ -70,41 +88,70 @@ const openChat = () => {
   })
 }
 
-const messages = ref([
-  { id: 1, userId: 2, authorName: '小明', avatar: '🧑', content: '今天天气真好！出去拍了几张', createdAt: new Date(Date.now() - 3600000).toISOString() },
-  { id: 2, userId: 3, authorName: '老王', avatar: '👨', content: '拍的什么题材？', createdAt: new Date(Date.now() - 1800000).toISOString() },
-  { id: 3, userId: 1, authorName: '测试用户', avatar: '👤', content: '刚拍了一组夜景，太美了', createdAt: new Date(Date.now() - 600000).toISOString() },
-])
+// 加载消息
+const loadMessages = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/messages?limit=50`)
+    const data = await res.json()
+    if (data.messages) {
+      messages.value = data.messages
+      scrollToBottom()
+    }
+  } catch (e) {
+    console.error('加载聊天消息失败:', e)
+  }
+}
 
-const newMessage = ref('')
-const canSend = ref(true)
-const countdown = ref(0)
-const msgList = ref(null)
-let timer = null
+// 轮询新消息
+const pollMessages = async () => {
+  if (!isOpen.value) return
+  try {
+    const res = await fetch(`${API_BASE}/messages?limit=50`)
+    const data = await res.json()
+    if (data.messages && data.messages.length !== messages.value.length) {
+      messages.value = data.messages
+      scrollToBottom()
+    }
+  } catch (e) { /* 静默失败 */ }
+}
 
-const formatTime = (time) => {
-  const d = new Date(time)
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+const openChat = () => {
+  isOpen.value = true
+  loading.value = true
+  loadMessages().finally(() => { loading.value = false })
+  // 启动轮询
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(pollMessages, 5000)
 }
 
 const handleSend = async () => {
-  if (!canSend.value || !newMessage.value.trim()) return
+  if (!canSend.value || !newMessage.value.trim() || !currentUser.value) return
 
-  const content = newMessage.value
+  const content = newMessage.value.trim()
   newMessage.value = ''
 
-  messages.value.push({
-    id: Date.now(),
-    userId: currentUser.value?.id || 0,
-    authorName: currentUser.value?.nickname || '我',
-    avatar: currentUser.value?.avatar || '😊',
-    content,
-    createdAt: new Date().toISOString()
-  })
+  try {
+    const token = localStorage.getItem('auth_token')
+    const res = await fetch(`${API_BASE}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ content })
+    })
+    const data = await res.json()
+    if (data.message) {
+      messages.value.push(data.message)
+      scrollToBottom()
+    }
+  } catch (e) {
+    console.error('发送消息失败:', e)
+  }
 
+  // 发送冷却
   canSend.value = false
-  countdown.value = 30
-
+  countdown.value = 10
   timer = setInterval(() => {
     countdown.value--
     if (countdown.value <= 0) {
@@ -112,21 +159,28 @@ const handleSend = async () => {
       clearInterval(timer)
     }
   }, 1000)
-
-  await nextTick()
-  if (msgList.value) {
-    msgList.value.scrollTop = msgList.value.scrollHeight
-  }
 }
 
+watch(isOpen, (val) => {
+  if (val) {
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(pollMessages, 5000)
+  } else {
+    if (pollTimer) clearInterval(pollTimer)
+  }
+})
+
 onMounted(() => {
-  if (msgList.value) {
-    msgList.value.scrollTop = msgList.value.scrollHeight
+  if (isOpen.value) {
+    loading.value = true
+    loadMessages().finally(() => { loading.value = false })
+    pollTimer = setInterval(pollMessages, 5000)
   }
 })
 
 onUnmounted(() => {
   clearInterval(timer)
+  clearInterval(pollTimer)
 })
 </script>
 
@@ -180,12 +234,11 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   font-weight: 600;
   font-size: 15px;
   flex-shrink: 0;
   color: #1a1a2e;
-  
 }
 
 .close-btn {
@@ -210,6 +263,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.chat-loading, .chat-empty {
+  text-align: center;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 14px;
+  padding: 40px 0;
 }
 
 .message {
@@ -263,34 +323,25 @@ onUnmounted(() => {
   color: #1a1a2e;
   line-height: 1.5;
   word-break: break-word;
-  
 }
 
 .message.self .msg-text {
   background: rgba(80, 130, 220, 0.5);
   color: #1a1a2e;
-  
-}
-
-.msg-author {
-  font-size: 12px;
-  color: #1a1a2e;
-  font-weight: 600;
-  
 }
 
 .chat-input {
   display: flex;
   gap: 8px;
   padding: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
 }
 
 .chat-input input {
   flex: 1;
   background: rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 8px;
   padding: 8px 12px;
   color: #1a1a2e;
