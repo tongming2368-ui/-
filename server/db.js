@@ -239,10 +239,11 @@ export function saveDB() {
 function run(sql, params = []) {
   try {
     db.run(sql, params)
-    saveDB()
-    // 获取 lastInsertRowid
+    // 获取 lastInsertRowid（必须在saveDB之前）
     const result = db.exec('SELECT last_insert_rowid() as id')
-    return { lastInsertRowid: result[0]?.values[0][0] || 0, changes: db.getRowsModified() }
+    const lastId = result[0]?.values[0][0] || 0
+    saveDB()
+    return { lastInsertRowid: lastId, changes: db.getRowsModified() }
   } catch (e) {
     console.error('DB run error:', e.message, sql)
     throw e

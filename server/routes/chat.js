@@ -60,7 +60,7 @@ router.post('/messages', authRequired, (req, res) => {
   
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)
   
-  db.prepare(`
+  const result = db.prepare(`
     INSERT INTO chat_messages (user_id, author_name, author_avatar, content)
     VALUES (?, ?, ?, ?)
   `).run(req.user.id, user.nickname || user.username, user.avatar || '👤', content.trim())
@@ -69,8 +69,8 @@ router.post('/messages', authRequired, (req, res) => {
     SELECT cm.*, u.nickname as author_name, u.avatar 
     FROM chat_messages cm
     LEFT JOIN users u ON cm.user_id = u.id
-    WHERE cm.id = last_insert_rowid()
-  `).get()
+    WHERE cm.id = ?
+  `).get(result.lastInsertRowid)
   
   res.json({ message })
 })
