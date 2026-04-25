@@ -77,6 +77,7 @@ router.get('/hot-yesterday', (req, res) => {
   .slice(0, limit)
   
   res.json({ posts: scored, date: yesterdayStr })
+})
 router.get('/:id', (req, res) => {
   const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(req.params.id)
   if (!post) return res.status(404).json({ error: '帖子不存在' })
@@ -306,6 +307,5 @@ router.post('/:id/report', authRequired, (req, res) => {
   res.json({ message: '举报已提交，管理员将尽快处理' })
 })
 
-})
 
 export default router

@@ -114,14 +114,14 @@ import { useUserStore } from '@/stores/user'
 import GlassCard from '@/components/common/GlassCard.vue'
 import { parseGIF, decompressFrames } from 'gifuct-js'
 import logoGifUrl from '@/assets/logo.gif'
-import { getAdminList } from '@/api/content'
+import api from '@/api/index'
 
 // 广告数据
 const activeAds = ref([])
 
 const loadAds = async () => {
   try {
-    const data = await getAdminList('ads')
+    const data = await api.get('/admin/ads')
     const allAds = (data.items || []).map(item => ({
       ...item,
       id: item.id,
